@@ -129,6 +129,10 @@ class HtmlDiff {
     }
 
     insertTag(tag, cssClass, words) {
+        this.specialTagDiffStack = [];
+        const modOpen = tag === 'del' ? '<del class="mod">' : '<ins class="mod">';
+        const modClose = tag === 'del' ? '</del>' : '</ins>';
+
         while (words.length) {
             let nonTags = this.extractConsecutiveWords(words, x => !Utils.isTag(x));
 
@@ -143,7 +147,7 @@ class HtmlDiff {
                     let matchedTag = words[0].match(specialCaseOpeningTagRegex);
                     matchedTag = '<' + matchedTag[0].replace(/(<|>| )/g, '') + '>';
                     this.specialTagDiffStack.push(matchedTag);
-                    specialCaseTagInjection = '<ins class="mod">';
+                    specialCaseTagInjection = modOpen;
                     if (tag === 'del') {
                         words.shift();
 
@@ -152,18 +156,22 @@ class HtmlDiff {
                         }
                     }
                 } else if (specialCaseClosingTags.has(words[0])) {
-                    let openingTag = this.specialTagDiffStack.length === 0 ? null : this.specialTagDiffStack.pop();
+                    const closingName = words[0].replace(/\//g, '');
+                    const stackTop = this.specialTagDiffStack.length === 0
+                        ? null
+                        : this.specialTagDiffStack[this.specialTagDiffStack.length - 1];
 
-                    if (!(openingTag === null || openingTag !== words[0].replace(/\//g, ''))) {
-                        specialCaseTagInjection = '</ins>';
+                    if (stackTop !== null && stackTop === closingName) {
+                        this.specialTagDiffStack.pop();
+                        specialCaseTagInjection = modClose;
                         specialCaseTagInjectionIsbefore = true;
-                    }
 
-                    if (tag === 'del') {
-                        words.shift();
-
-                        while (words.length > 0 && specialCaseClosingTags.has(words[0])) {
+                        if (tag === 'del') {
                             words.shift();
+
+                            while (words.length > 0 && specialCaseClosingTags.has(words[0])) {
+                                words.shift();
+                            }
                         }
                     }
                 }

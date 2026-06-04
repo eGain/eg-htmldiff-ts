@@ -1,13 +1,14 @@
 {
   "name": "@wesley-edwards/htmldiff-ts",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Revamped version of htmldiff-js. Display diff between two html strings.",
   "main": "./dist/htmldiff.min.js",
   "types": "index.d.ts",
   "author": "Wesley Edwards",
   "license": "ISC",
   "scripts": {
-    "build": "NODE_OPTIONS=--openssl-legacy-provider webpack --mode production"
+    "build": "webpack --mode production",
+    "prepare": "npm run build"
   },
   "repository": {
     "type": "git",
