@@ -2965,6 +2965,10 @@ var wordRegex = /[\w\#@]+/;
 
 var specialCaseWordTags = ['<img'];
 
+var FORMATTING_TAGS = new Set(['strong', 'b', 'i', 'dfn', 'em', 'big', 'small', 'u', 'sub', 'sup', 'strike', 's']);
+
+var SEMANTIC_WRAPPER_TAGS = new Set(['eg-condition']);
+
 function isTag(item) {
     if (specialCaseWordTags.some(function (re) {
         return item !== null && item.startsWith(re);
@@ -3017,6 +3021,297 @@ function isWord(text) {
     return wordRegex.test(text);
 }
 
+function getTagName(word) {
+    if (!isTag(word)) {
+        return null;
+    }
+
+    var match = word.match(/^<\/?([^\s>\/]+)/);
+    return match ? match[1].toLowerCase() : null;
+}
+
+function isClosingTag(word) {
+    return isTag(word) && /^\s*<\//.test(word);
+}
+
+function isSelfClosingTag(word) {
+    return isTag(word) && !isClosingTag(word) && /\/>\s*$/.test(word);
+}
+
+function isOpeningTag(word) {
+    return isTag(word) && !isClosingTag(word) && !isSelfClosingTag(word);
+}
+
+function findElementCloseIndex(words, openIndex) {
+    var tagName = getTagName(words[openIndex]);
+    if (!tagName) {
+        return openIndex;
+    }
+
+    var depth = 1;
+    for (var i = openIndex + 1; i < words.length; i++) {
+        var word = words[i];
+        if (!isTag(word)) {
+            continue;
+        }
+
+        var wordTagName = getTagName(word);
+        if (wordTagName !== tagName) {
+            continue;
+        }
+
+        if (isClosingTag(word)) {
+            depth--;
+            if (depth === 0) {
+                return i;
+            }
+        } else if (isOpeningTag(word)) {
+            depth++;
+        }
+    }
+
+    return openIndex;
+}
+
+function isAttributeOnlyTagDifference(oldWord, newWord) {
+    return isTag(oldWord) && isTag(newWord) && oldWord !== newWord && stripTagAttributes(oldWord) === stripTagAttributes(newWord);
+}
+
+function isFormattingOpeningTag(word) {
+    if (!isOpeningTag(word)) {
+        return false;
+    }
+
+    var tagName = getTagName(word);
+    return tagName !== null && FORMATTING_TAGS.has(tagName);
+}
+
+function hasFormattingInWords(words) {
+    return words.some(function (word) {
+        return isFormattingOpeningTag(word);
+    });
+}
+
+function plainTextFromWords(words) {
+    return words.filter(function (word) {
+        return !isTag(word);
+    }).join('');
+}
+
+function wrapInnerFormattingContent(innerWords) {
+    if (hasFormattingInWords(innerWords)) {
+        var result = '';
+        var i = 0;
+
+        while (i < innerWords.length) {
+            var word = innerWords[i];
+
+            if (isFormattingOpeningTag(word)) {
+                var closeIdx = findElementCloseIndex(innerWords, i);
+                result += innerWords[i];
+                result += wrapInnerFormattingContent(innerWords.slice(i + 1, closeIdx));
+                result += innerWords[closeIdx];
+                i = closeIdx + 1;
+            } else {
+                result += word;
+                i++;
+            }
+        }
+
+        return result;
+    }
+
+    var innerPlain = plainTextFromWords(innerWords);
+    if (!innerPlain) {
+        return '';
+    }
+
+    return wrapText(innerPlain, 'ins', 'format-change');
+}
+
+function renderFormatAdded(newWords) {
+    var result = '';
+    var i = 0;
+
+    while (i < newWords.length) {
+        var word = newWords[i];
+
+        if (isFormattingOpeningTag(word)) {
+            var closeIdx = findElementCloseIndex(newWords, i);
+            result += newWords[i];
+            result += wrapInnerFormattingContent(newWords.slice(i + 1, closeIdx));
+            result += newWords[closeIdx];
+            i = closeIdx + 1;
+        } else {
+            result += word;
+            i++;
+        }
+    }
+
+    return result;
+}
+
+function renderFormatRemoved(oldWords) {
+    var result = '';
+    var i = 0;
+
+    while (i < oldWords.length) {
+        var word = oldWords[i];
+
+        if (isFormattingOpeningTag(word)) {
+            var closeIdx = findElementCloseIndex(oldWords, i);
+            var segment = oldWords.slice(i, closeIdx + 1).join('');
+            result += wrapText(segment, 'del', 'format-change');
+            i = closeIdx + 1;
+        } else {
+            result += word;
+            i++;
+        }
+    }
+
+    return result;
+}
+
+function isFormattingOnlyChange(oldWords, newWords) {
+    if (plainTextFromWords(oldWords) !== plainTextFromWords(newWords)) {
+        return false;
+    }
+
+    return hasFormattingInWords(oldWords) || hasFormattingInWords(newWords);
+}
+
+function isSemanticWrapperOpeningTag(word) {
+    if (!isOpeningTag(word)) {
+        return false;
+    }
+
+    var tagName = getTagName(word);
+    return tagName !== null && SEMANTIC_WRAPPER_TAGS.has(tagName);
+}
+
+function isSemanticWrapperClosingTag(word) {
+    if (!isClosingTag(word)) {
+        return false;
+    }
+
+    var tagName = getTagName(word);
+    return tagName !== null && SEMANTIC_WRAPPER_TAGS.has(tagName);
+}
+
+function hasSemanticWrapperInWords(words) {
+    return words.some(function (word) {
+        return isSemanticWrapperOpeningTag(word);
+    });
+}
+
+function renderWrapperAdded(newWords) {
+    var result = '';
+    var i = 0;
+
+    while (i < newWords.length) {
+        var word = newWords[i];
+
+        if (isSemanticWrapperOpeningTag(word)) {
+            var closeIdx = findElementCloseIndex(newWords, i);
+            var segment = newWords.slice(i, closeIdx + 1).join('');
+            result += wrapText(segment, 'ins', 'structure-change');
+            i = closeIdx + 1;
+        } else {
+            result += word;
+            i++;
+        }
+    }
+
+    return result;
+}
+
+function renderWrapperRemoved(oldWords) {
+    var result = '';
+    var i = 0;
+
+    while (i < oldWords.length) {
+        var word = oldWords[i];
+
+        if (isSemanticWrapperOpeningTag(word)) {
+            var closeIdx = findElementCloseIndex(oldWords, i);
+            var segment = oldWords.slice(i, closeIdx + 1).join('');
+            result += wrapText(segment, 'del', 'structure-change');
+            i = closeIdx + 1;
+        } else {
+            result += word;
+            i++;
+        }
+    }
+
+    return result;
+}
+
+function isWrapperOnlyChange(oldWords, newWords) {
+    if (plainTextFromWords(oldWords) !== plainTextFromWords(newWords)) {
+        return false;
+    }
+
+    if (oldWords.join('') === newWords.join('')) {
+        return false;
+    }
+
+    return hasSemanticWrapperInWords(oldWords) || hasSemanticWrapperInWords(newWords);
+}
+
+function renderWrapperOnlyChange(oldWords, newWords) {
+    var oldHasWrapper = hasSemanticWrapperInWords(oldWords);
+    var newHasWrapper = hasSemanticWrapperInWords(newWords);
+
+    if (newHasWrapper && !oldHasWrapper) {
+        return renderWrapperAdded(newWords);
+    }
+
+    if (oldHasWrapper && !newHasWrapper) {
+        return renderWrapperRemoved(oldWords);
+    }
+
+    if (newHasWrapper) {
+        return renderWrapperAdded(newWords);
+    }
+
+    return newWords.join('');
+}
+
+function renderFormattingOnlyChange(oldWords, newWords) {
+    var oldHasFormatting = hasFormattingInWords(oldWords);
+    var newHasFormatting = hasFormattingInWords(newWords);
+
+    if (newHasFormatting && !oldHasFormatting) {
+        return renderFormatAdded(newWords);
+    }
+
+    if (oldHasFormatting && !newHasFormatting) {
+        return renderFormatRemoved(oldWords);
+    }
+
+    if (newHasFormatting) {
+        return renderFormatAdded(newWords);
+    }
+
+    return newWords.join('');
+}
+
+function wordsSliceEqual(oldWords, newWords, oldStart, oldEnd, newStart, newEnd) {
+    var oldLen = oldEnd - oldStart;
+    var newLen = newEnd - newStart;
+    if (oldLen !== newLen) {
+        return false;
+    }
+
+    for (var i = 0; i < oldLen; i++) {
+        if (oldWords[oldStart + i] !== newWords[newStart + i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 exports.isTag = isTag;
 exports.stripTagAttributes = stripTagAttributes;
 exports.wrapText = wrapText;
@@ -3027,6 +3322,23 @@ exports.isEndOfEntity = isEndOfEntity;
 exports.isWhiteSpace = isWhiteSpace;
 exports.stripAnyAttributes = stripAnyAttributes;
 exports.isWord = isWord;
+exports.getTagName = getTagName;
+exports.isClosingTag = isClosingTag;
+exports.isSelfClosingTag = isSelfClosingTag;
+exports.isOpeningTag = isOpeningTag;
+exports.findElementCloseIndex = findElementCloseIndex;
+exports.isAttributeOnlyTagDifference = isAttributeOnlyTagDifference;
+exports.wordsSliceEqual = wordsSliceEqual;
+exports.isFormattingOpeningTag = isFormattingOpeningTag;
+exports.hasFormattingInWords = hasFormattingInWords;
+exports.plainTextFromWords = plainTextFromWords;
+exports.isFormattingOnlyChange = isFormattingOnlyChange;
+exports.renderFormattingOnlyChange = renderFormattingOnlyChange;
+exports.isSemanticWrapperOpeningTag = isSemanticWrapperOpeningTag;
+exports.isSemanticWrapperClosingTag = isSemanticWrapperClosingTag;
+exports.hasSemanticWrapperInWords = hasSemanticWrapperInWords;
+exports.isWrapperOnlyChange = isWrapperOnlyChange;
+exports.renderWrapperOnlyChange = renderWrapperOnlyChange;
 
 /***/ }),
 /* 94 */
@@ -9747,7 +10059,7 @@ var HtmlDiff = function () {
             this.splitInputsIntoWords();
 
             this.matchGranularity = Math.min(MatchGranuarityMaximum, this.oldWords.length, this.newWords.length);
-            var operations = this.operations();
+            var operations = this.coalesceWrapperOperations(this.operations());
 
             var _iteratorNormalCompletion = true;
             var _didIteratorError = false;
@@ -9829,6 +10141,19 @@ var HtmlDiff = function () {
     }, {
         key: 'processReplaceOperation',
         value: function processReplaceOperation(opp) {
+            var oldWords = this.oldWords.slice(opp.startInOld, opp.endInOld);
+            var newWords = this.newWords.slice(opp.startInNew, opp.endInNew);
+
+            if (Utils.isWrapperOnlyChange(oldWords, newWords)) {
+                this.content.push(Utils.renderWrapperOnlyChange(oldWords, newWords));
+                return;
+            }
+
+            if (Utils.isFormattingOnlyChange(oldWords, newWords)) {
+                this.content.push(Utils.renderFormattingOnlyChange(oldWords, newWords));
+                return;
+            }
+
             this.processDeleteOperation(opp, "diffmod");
             this.processInsertOperation(opp, "diffmod");
         }
@@ -9851,10 +10176,46 @@ var HtmlDiff = function () {
     }, {
         key: 'processEqualOperation',
         value: function processEqualOperation(opp) {
-            var result = this.newWords.filter(function (s, pos) {
-                return pos >= opp.startInNew && pos < opp.endInNew;
-            });
-            this.content.push(result.join(''));
+            var length = opp.endInNew - opp.startInNew;
+            var i = 0;
+
+            while (i < length) {
+                var oldWord = this.oldWords[opp.startInOld + i];
+                var newWord = this.newWords[opp.startInNew + i];
+
+                if (oldWord === newWord) {
+                    this.content.push(newWord);
+                    i++;
+                    continue;
+                }
+
+                if (Utils.isAttributeOnlyTagDifference(oldWord, newWord)) {
+                    if (Utils.isSelfClosingTag(newWord)) {
+                        this.content.push(Utils.wrapText(newWord, 'ins', 'diffmod'));
+                        i++;
+                        continue;
+                    }
+
+                    if (Utils.isOpeningTag(newWord)) {
+                        var oldOpenIdx = opp.startInOld + i;
+                        var newOpenIdx = opp.startInNew + i;
+                        var oldCloseIdx = Utils.findElementCloseIndex(this.oldWords, oldOpenIdx);
+                        var newCloseIdx = Utils.findElementCloseIndex(this.newWords, newOpenIdx);
+                        var oldCloseRel = oldCloseIdx - oldOpenIdx;
+                        var newCloseRel = newCloseIdx - newOpenIdx;
+
+                        if (oldCloseRel === newCloseRel && oldCloseRel > 0 && Utils.wordsSliceEqual(this.oldWords, this.newWords, oldOpenIdx + 1, oldCloseIdx, newOpenIdx + 1, newCloseIdx)) {
+                            var newSubtree = this.newWords.slice(newOpenIdx, newCloseIdx + 1);
+                            this.content.push(Utils.wrapText(newSubtree.join(''), 'ins', 'diffmod'));
+                            i += newCloseRel + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                this.content.push(Utils.wrapText(oldWord, 'del', 'diffmod'), Utils.wrapText(newWord, 'ins', 'diffmod'));
+                i++;
+            }
         }
     }, {
         key: 'insertTag',
@@ -9952,6 +10313,153 @@ var HtmlDiff = function () {
                 words.splice(0, words.length);
                 return _items;
             }
+        }
+    }, {
+        key: 'coalesceWrapperOperations',
+        value: function coalesceWrapperOperations(operations) {
+            var result = [];
+            var i = 0;
+
+            while (i < operations.length) {
+                var coalescedInsert = this.tryCoalesceWrapperInsert(operations, i);
+                if (coalescedInsert) {
+                    result.push(coalescedInsert.operation);
+                    i = coalescedInsert.nextIndex;
+                    continue;
+                }
+
+                var coalescedDelete = this.tryCoalesceWrapperRemove(operations, i);
+                if (coalescedDelete) {
+                    result.push(coalescedDelete.operation);
+                    i = coalescedDelete.nextIndex;
+                    continue;
+                }
+
+                result.push(operations[i]);
+                i++;
+            }
+
+            return result;
+        }
+    }, {
+        key: 'tryCoalesceWrapperInsert',
+        value: function tryCoalesceWrapperInsert(operations, index) {
+            if (index + 2 >= operations.length) {
+                return null;
+            }
+
+            var insertOpen = operations[index];
+            var equalOp = operations[index + 1];
+            var insertClose = operations[index + 2];
+
+            if (insertOpen.action !== _Action2.default.insert || equalOp.action !== _Action2.default.equal || insertClose.action !== _Action2.default.insert) {
+                return null;
+            }
+
+            var openWords = this.newWords.slice(insertOpen.startInNew, insertOpen.endInNew);
+            var closeWords = this.newWords.slice(insertClose.startInNew, insertClose.endInNew);
+
+            if (openWords.length !== 1 || closeWords.length !== 1) {
+                return null;
+            }
+
+            if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) || !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+                return null;
+            }
+
+            if (Utils.getTagName(openWords[0]) !== Utils.getTagName(closeWords[0])) {
+                return null;
+            }
+
+            var wrapperOpenIdx = insertOpen.startInNew;
+            var wrapperCloseIdx = insertClose.startInNew;
+            var expectedCloseIdx = Utils.findElementCloseIndex(this.newWords, wrapperOpenIdx);
+
+            if (expectedCloseIdx !== wrapperCloseIdx) {
+                return null;
+            }
+
+            if (equalOp.startInNew !== wrapperOpenIdx + 1 || equalOp.endInNew !== wrapperCloseIdx) {
+                return null;
+            }
+
+            var oldEqualWords = this.oldWords.slice(equalOp.startInOld, equalOp.endInOld);
+            var newInnerWords = this.newWords.slice(equalOp.startInNew, equalOp.endInNew);
+
+            if (oldEqualWords.some(function (word) {
+                return Utils.isTag(word);
+            })) {
+                return null;
+            }
+
+            if (Utils.plainTextFromWords(oldEqualWords) !== Utils.plainTextFromWords(newInnerWords)) {
+                return null;
+            }
+
+            return {
+                operation: new _Operation2.default(_Action2.default.replace, equalOp.startInOld, equalOp.endInOld, wrapperOpenIdx, expectedCloseIdx + 1),
+                nextIndex: index + 3
+            };
+        }
+    }, {
+        key: 'tryCoalesceWrapperRemove',
+        value: function tryCoalesceWrapperRemove(operations, index) {
+            if (index + 2 >= operations.length) {
+                return null;
+            }
+
+            var deleteOpen = operations[index];
+            var equalOp = operations[index + 1];
+            var deleteClose = operations[index + 2];
+
+            if (deleteOpen.action !== _Action2.default.delete || equalOp.action !== _Action2.default.equal || deleteClose.action !== _Action2.default.delete) {
+                return null;
+            }
+
+            var openWords = this.oldWords.slice(deleteOpen.startInOld, deleteOpen.endInOld);
+            var closeWords = this.oldWords.slice(deleteClose.startInOld, deleteClose.endInOld);
+
+            if (openWords.length !== 1 || closeWords.length !== 1) {
+                return null;
+            }
+
+            if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) || !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+                return null;
+            }
+
+            if (Utils.getTagName(openWords[0]) !== Utils.getTagName(closeWords[0])) {
+                return null;
+            }
+
+            var wrapperOpenIdx = deleteOpen.startInOld;
+            var wrapperCloseIdx = deleteClose.startInOld;
+            var expectedCloseIdx = Utils.findElementCloseIndex(this.oldWords, wrapperOpenIdx);
+
+            if (expectedCloseIdx !== wrapperCloseIdx) {
+                return null;
+            }
+
+            if (equalOp.startInOld !== wrapperOpenIdx + 1 || equalOp.endInOld !== wrapperCloseIdx) {
+                return null;
+            }
+
+            var newEqualWords = this.newWords.slice(equalOp.startInNew, equalOp.endInNew);
+            var oldInnerWords = this.oldWords.slice(equalOp.startInOld, equalOp.endInOld);
+
+            if (newEqualWords.some(function (word) {
+                return Utils.isTag(word);
+            })) {
+                return null;
+            }
+
+            if (Utils.plainTextFromWords(oldInnerWords) !== Utils.plainTextFromWords(newEqualWords)) {
+                return null;
+            }
+
+            return {
+                operation: new _Operation2.default(_Action2.default.replace, wrapperOpenIdx, expectedCloseIdx + 1, equalOp.startInNew, equalOp.endInNew),
+                nextIndex: index + 3
+            };
         }
     }, {
         key: 'operations',

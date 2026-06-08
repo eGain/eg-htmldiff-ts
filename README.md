@@ -4,6 +4,18 @@ This is a fork of [htmldiff-js](https://github.com/dfoverdx/htmldiff-js), which 
 
 NPM package: [@wesley-edwards/htmldiff-ts](https://www.npmjs.com/package/@wesley-edwards/htmldiff-ts)
 
+## Changes in 1.0.6
+
+Version 1.0.6 fixes invisible diffs when plain text is wrapped or unwrapped in semantic tags such as `eg-condition`. Wrapper insert/delete operations are coalesced and rendered with `structure-change` highlights instead of emitting raw tags.
+
+## Changes in 1.0.5
+
+Version 1.0.5 fixes noisy diffs for formatting-only inline changes (for example bolding one character in `test` → `t<strong>e</strong>st`). When plain text is unchanged, `processReplaceOperation` now renders `format-change` highlights instead of `del.diffmod`/`ins.diffmod` fragmentation.
+
+## Changes in 1.0.4
+
+Version 1.0.4 fixes invisible diffs when only HTML tag attributes change (for example `eg-condition` `tags="..."` updates). Matching still strips attributes to find structural anchors, but `processEqualOperation` now detects attribute-only tag differences and wraps the full new element subtree in `<ins class="diffmod">` without a `<del>` wrapper.
+
 ## Changes in 1.0.3
 
 Version 1.0.3 fixes incorrect handling of inline formatting tags (`<strong>`, `<em>`, `<b>`, `<i>`, etc.) inside `insertTag` in `src/Diff.js`. The bug showed up when a **replace** operation ran a delete pass followed by an insert pass on the same region (for example, collapsing a nested list step into flat list text). The diff could emit unbalanced markup such as `</strong></li><strong>`, which made the rest of the document render as bold.

@@ -52,7 +52,7 @@ class HtmlDiff {
         this.splitInputsIntoWords();
 
         this.matchGranularity = Math.min(MatchGranuarityMaximum, this.oldWords.length, this.newWords.length);
-        let operations = this.operations();
+        let operations = this.coalesceWrapperOperations(this.operations());
 
         for (let item of operations) {
             this.performOperation(item);
@@ -109,6 +109,19 @@ class HtmlDiff {
     }
 
     processReplaceOperation(opp) {
+        const oldWords = this.oldWords.slice(opp.startInOld, opp.endInOld);
+        const newWords = this.newWords.slice(opp.startInNew, opp.endInNew);
+
+        if (Utils.isWrapperOnlyChange(oldWords, newWords)) {
+            this.content.push(Utils.renderWrapperOnlyChange(oldWords, newWords));
+            return;
+        }
+
+        if (Utils.isFormattingOnlyChange(oldWords, newWords)) {
+            this.content.push(Utils.renderFormattingOnlyChange(oldWords, newWords));
+            return;
+        }
+
         this.processDeleteOperation(opp, "diffmod");
         this.processInsertOperation(opp, "diffmod");
     }
@@ -124,8 +137,57 @@ class HtmlDiff {
     }
 
     processEqualOperation(opp) {
-        let result = this.newWords.filter((s, pos) => pos >= opp.startInNew && pos < opp.endInNew);
-        this.content.push(result.join(''));
+        const length = opp.endInNew - opp.startInNew;
+        let i = 0;
+
+        while (i < length) {
+            const oldWord = this.oldWords[opp.startInOld + i];
+            const newWord = this.newWords[opp.startInNew + i];
+
+            if (oldWord === newWord) {
+                this.content.push(newWord);
+                i++;
+                continue;
+            }
+
+            if (Utils.isAttributeOnlyTagDifference(oldWord, newWord)) {
+                if (Utils.isSelfClosingTag(newWord)) {
+                    this.content.push(Utils.wrapText(newWord, 'ins', 'diffmod'));
+                    i++;
+                    continue;
+                }
+
+                if (Utils.isOpeningTag(newWord)) {
+                    const oldOpenIdx = opp.startInOld + i;
+                    const newOpenIdx = opp.startInNew + i;
+                    const oldCloseIdx = Utils.findElementCloseIndex(this.oldWords, oldOpenIdx);
+                    const newCloseIdx = Utils.findElementCloseIndex(this.newWords, newOpenIdx);
+                    const oldCloseRel = oldCloseIdx - oldOpenIdx;
+                    const newCloseRel = newCloseIdx - newOpenIdx;
+
+                    if (oldCloseRel === newCloseRel && oldCloseRel > 0 &&
+                        Utils.wordsSliceEqual(
+                            this.oldWords,
+                            this.newWords,
+                            oldOpenIdx + 1,
+                            oldCloseIdx,
+                            newOpenIdx + 1,
+                            newCloseIdx
+                        )) {
+                        const newSubtree = this.newWords.slice(newOpenIdx, newCloseIdx + 1);
+                        this.content.push(Utils.wrapText(newSubtree.join(''), 'ins', 'diffmod'));
+                        i += newCloseRel + 1;
+                        continue;
+                    }
+                }
+            }
+
+            this.content.push(
+                Utils.wrapText(oldWord, 'del', 'diffmod'),
+                Utils.wrapText(newWord, 'ins', 'diffmod')
+            );
+            i++;
+        }
     }
 
     insertTag(tag, cssClass, words) {
@@ -218,6 +280,164 @@ class HtmlDiff {
             words.splice(0, words.length);
             return items;
         }
+    }
+
+    coalesceWrapperOperations(operations) {
+        const result = [];
+        let i = 0;
+
+        while (i < operations.length) {
+            const coalescedInsert = this.tryCoalesceWrapperInsert(operations, i);
+            if (coalescedInsert) {
+                result.push(coalescedInsert.operation);
+                i = coalescedInsert.nextIndex;
+                continue;
+            }
+
+            const coalescedDelete = this.tryCoalesceWrapperRemove(operations, i);
+            if (coalescedDelete) {
+                result.push(coalescedDelete.operation);
+                i = coalescedDelete.nextIndex;
+                continue;
+            }
+
+            result.push(operations[i]);
+            i++;
+        }
+
+        return result;
+    }
+
+    tryCoalesceWrapperInsert(operations, index) {
+        if (index + 2 >= operations.length) {
+            return null;
+        }
+
+        const insertOpen = operations[index];
+        const equalOp = operations[index + 1];
+        const insertClose = operations[index + 2];
+
+        if (insertOpen.action !== Action.insert ||
+            equalOp.action !== Action.equal ||
+            insertClose.action !== Action.insert) {
+            return null;
+        }
+
+        const openWords = this.newWords.slice(insertOpen.startInNew, insertOpen.endInNew);
+        const closeWords = this.newWords.slice(insertClose.startInNew, insertClose.endInNew);
+
+        if (openWords.length !== 1 || closeWords.length !== 1) {
+            return null;
+        }
+
+        if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) ||
+            !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+            return null;
+        }
+
+        if (Utils.getTagName(openWords[0]) !== Utils.getTagName(closeWords[0])) {
+            return null;
+        }
+
+        const wrapperOpenIdx = insertOpen.startInNew;
+        const wrapperCloseIdx = insertClose.startInNew;
+        const expectedCloseIdx = Utils.findElementCloseIndex(this.newWords, wrapperOpenIdx);
+
+        if (expectedCloseIdx !== wrapperCloseIdx) {
+            return null;
+        }
+
+        if (equalOp.startInNew !== wrapperOpenIdx + 1 || equalOp.endInNew !== wrapperCloseIdx) {
+            return null;
+        }
+
+        const oldEqualWords = this.oldWords.slice(equalOp.startInOld, equalOp.endInOld);
+        const newInnerWords = this.newWords.slice(equalOp.startInNew, equalOp.endInNew);
+
+        if (oldEqualWords.some(word => Utils.isTag(word))) {
+            return null;
+        }
+
+        if (Utils.plainTextFromWords(oldEqualWords) !== Utils.plainTextFromWords(newInnerWords)) {
+            return null;
+        }
+
+        return {
+            operation: new Operation(
+                Action.replace,
+                equalOp.startInOld,
+                equalOp.endInOld,
+                wrapperOpenIdx,
+                expectedCloseIdx + 1
+            ),
+            nextIndex: index + 3
+        };
+    }
+
+    tryCoalesceWrapperRemove(operations, index) {
+        if (index + 2 >= operations.length) {
+            return null;
+        }
+
+        const deleteOpen = operations[index];
+        const equalOp = operations[index + 1];
+        const deleteClose = operations[index + 2];
+
+        if (deleteOpen.action !== Action.delete ||
+            equalOp.action !== Action.equal ||
+            deleteClose.action !== Action.delete) {
+            return null;
+        }
+
+        const openWords = this.oldWords.slice(deleteOpen.startInOld, deleteOpen.endInOld);
+        const closeWords = this.oldWords.slice(deleteClose.startInOld, deleteClose.endInOld);
+
+        if (openWords.length !== 1 || closeWords.length !== 1) {
+            return null;
+        }
+
+        if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) ||
+            !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+            return null;
+        }
+
+        if (Utils.getTagName(openWords[0]) !== Utils.getTagName(closeWords[0])) {
+            return null;
+        }
+
+        const wrapperOpenIdx = deleteOpen.startInOld;
+        const wrapperCloseIdx = deleteClose.startInOld;
+        const expectedCloseIdx = Utils.findElementCloseIndex(this.oldWords, wrapperOpenIdx);
+
+        if (expectedCloseIdx !== wrapperCloseIdx) {
+            return null;
+        }
+
+        if (equalOp.startInOld !== wrapperOpenIdx + 1 || equalOp.endInOld !== wrapperCloseIdx) {
+            return null;
+        }
+
+        const newEqualWords = this.newWords.slice(equalOp.startInNew, equalOp.endInNew);
+        const oldInnerWords = this.oldWords.slice(equalOp.startInOld, equalOp.endInOld);
+
+        if (newEqualWords.some(word => Utils.isTag(word))) {
+            return null;
+        }
+
+        if (Utils.plainTextFromWords(oldInnerWords) !== Utils.plainTextFromWords(newEqualWords)) {
+            return null;
+        }
+
+        return {
+            operation: new Operation(
+                Action.replace,
+                wrapperOpenIdx,
+                expectedCloseIdx + 1,
+                equalOp.startInNew,
+                equalOp.endInNew
+            ),
+            nextIndex: index + 3
+        };
     }
 
     operations() {
