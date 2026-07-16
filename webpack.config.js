@@ -13,8 +13,7 @@ module.exports = {
         path: path.resolve(__dirname, 'dist'),
         publicPath: '/dist/',
         library: 'HtmlDiff',
-        libraryTarget: 'commonjs2',
-        libraryExport: 'default'
+        libraryTarget: 'commonjs2'
     },
 
     module: {
