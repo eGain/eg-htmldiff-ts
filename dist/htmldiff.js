@@ -2969,6 +2969,35 @@ var FORMATTING_TAGS = new Set(['strong', 'b', 'i', 'dfn', 'em', 'big', 'small', 
 
 var SEMANTIC_WRAPPER_TAGS = new Set(['eg-condition']);
 
+var BLOCK_LEVEL_TAGS = new Set(['address', 'article', 'aside', 'blockquote', 'caption', 'col', 'colgroup', 'dd', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul']);
+
+function isBlockLevelTag(word) {
+    var tagName = getTagName(word);
+    return tagName !== null && BLOCK_LEVEL_TAGS.has(tagName);
+}
+
+function canWrapWordsInDiffTag(words, start, end) {
+    for (var i = start; i < end; i++) {
+        if (isBlockLevelTag(words[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function markTagAttributeChange(tagWord) {
+    if (/\sdata-diff=/.test(tagWord)) {
+        return tagWord;
+    }
+    if (isSelfClosingTag(tagWord)) {
+        return tagWord.replace(/\/>(\s*)$/, ' data-diff="attrmod" />$1');
+    }
+    if (isOpeningTag(tagWord)) {
+        return tagWord.replace(/>(\s*)$/, ' data-diff="attrmod">$1');
+    }
+    return tagWord;
+}
+
 function isTag(item) {
     if (specialCaseWordTags.some(function (re) {
         return item !== null && item.startsWith(re);
@@ -3328,6 +3357,9 @@ exports.isSelfClosingTag = isSelfClosingTag;
 exports.isOpeningTag = isOpeningTag;
 exports.findElementCloseIndex = findElementCloseIndex;
 exports.isAttributeOnlyTagDifference = isAttributeOnlyTagDifference;
+exports.isBlockLevelTag = isBlockLevelTag;
+exports.canWrapWordsInDiffTag = canWrapWordsInDiffTag;
+exports.markTagAttributeChange = markTagAttributeChange;
 exports.wordsSliceEqual = wordsSliceEqual;
 exports.isFormattingOpeningTag = isFormattingOpeningTag;
 exports.hasFormattingInWords = hasFormattingInWords;
@@ -10191,7 +10223,12 @@ var HtmlDiff = function () {
 
                 if (Utils.isAttributeOnlyTagDifference(oldWord, newWord)) {
                     if (Utils.isSelfClosingTag(newWord)) {
-                        this.content.push(Utils.wrapText(newWord, 'ins', 'diffmod'));
+                        if (!Utils.isBlockLevelTag(newWord)) {
+                            this.content.push(Utils.wrapText(newWord, 'ins', 'diffmod'));
+                            i++;
+                            continue;
+                        }
+                        this.content.push(Utils.markTagAttributeChange(newWord));
                         i++;
                         continue;
                     }
@@ -10204,13 +10241,17 @@ var HtmlDiff = function () {
                         var oldCloseRel = oldCloseIdx - oldOpenIdx;
                         var newCloseRel = newCloseIdx - newOpenIdx;
 
-                        if (oldCloseRel === newCloseRel && oldCloseRel > 0 && Utils.wordsSliceEqual(this.oldWords, this.newWords, oldOpenIdx + 1, oldCloseIdx, newOpenIdx + 1, newCloseIdx)) {
+                        if (oldCloseRel === newCloseRel && oldCloseRel > 0 && !Utils.isBlockLevelTag(newWord) && Utils.canWrapWordsInDiffTag(this.newWords, newOpenIdx + 1, newCloseIdx) && Utils.wordsSliceEqual(this.oldWords, this.newWords, oldOpenIdx + 1, oldCloseIdx, newOpenIdx + 1, newCloseIdx)) {
                             var newSubtree = this.newWords.slice(newOpenIdx, newCloseIdx + 1);
                             this.content.push(Utils.wrapText(newSubtree.join(''), 'ins', 'diffmod'));
                             i += newCloseRel + 1;
                             continue;
                         }
                     }
+
+                    this.content.push(Utils.markTagAttributeChange(newWord));
+                    i++;
+                    continue;
                 }
 
                 this.content.push(Utils.wrapText(oldWord, 'del', 'diffmod'), Utils.wrapText(newWord, 'ins', 'diffmod'));

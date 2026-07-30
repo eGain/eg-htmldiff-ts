@@ -152,7 +152,12 @@ class HtmlDiff {
 
             if (Utils.isAttributeOnlyTagDifference(oldWord, newWord)) {
                 if (Utils.isSelfClosingTag(newWord)) {
-                    this.content.push(Utils.wrapText(newWord, 'ins', 'diffmod'));
+                    if (!Utils.isBlockLevelTag(newWord)) {
+                        this.content.push(Utils.wrapText(newWord, 'ins', 'diffmod'));
+                        i++;
+                        continue;
+                    }
+                    this.content.push(Utils.markTagAttributeChange(newWord));
                     i++;
                     continue;
                 }
@@ -166,6 +171,8 @@ class HtmlDiff {
                     const newCloseRel = newCloseIdx - newOpenIdx;
 
                     if (oldCloseRel === newCloseRel && oldCloseRel > 0 &&
+                        !Utils.isBlockLevelTag(newWord) &&
+                        Utils.canWrapWordsInDiffTag(this.newWords, newOpenIdx + 1, newCloseIdx) &&
                         Utils.wordsSliceEqual(
                             this.oldWords,
                             this.newWords,
@@ -180,6 +187,10 @@ class HtmlDiff {
                         continue;
                     }
                 }
+
+                this.content.push(Utils.markTagAttributeChange(newWord));
+                i++;
+                continue;
             }
 
             this.content.push(

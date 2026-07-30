@@ -15,6 +15,40 @@ const SEMANTIC_WRAPPER_TAGS = new Set([
     'eg-condition'
 ]);
 
+const BLOCK_LEVEL_TAGS = new Set([
+    'address', 'article', 'aside', 'blockquote', 'caption', 'col', 'colgroup', 'dd', 'div', 'dl', 'dt',
+    'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header',
+    'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead',
+    'tr', 'ul'
+]);
+
+function isBlockLevelTag(word) {
+    const tagName = getTagName(word);
+    return tagName !== null && BLOCK_LEVEL_TAGS.has(tagName);
+}
+
+function canWrapWordsInDiffTag(words, start, end) {
+    for (let i = start; i < end; i++) {
+        if (isBlockLevelTag(words[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function markTagAttributeChange(tagWord) {
+    if (/\sdata-diff=/.test(tagWord)) {
+        return tagWord;
+    }
+    if (isSelfClosingTag(tagWord)) {
+        return tagWord.replace(/\/>(\s*)$/, ' data-diff="attrmod" />$1');
+    }
+    if (isOpeningTag(tagWord)) {
+        return tagWord.replace(/>(\s*)$/, ' data-diff="attrmod">$1');
+    }
+    return tagWord;
+}
+
 function isTag(item) {
     if (specialCaseWordTags.some(re => item !== null && item.startsWith(re))) {
         return false;
@@ -372,6 +406,9 @@ export {
     isOpeningTag,
     findElementCloseIndex,
     isAttributeOnlyTagDifference,
+    isBlockLevelTag,
+    canWrapWordsInDiffTag,
+    markTagAttributeChange,
     wordsSliceEqual,
     isFormattingOpeningTag,
     hasFormattingInWords,

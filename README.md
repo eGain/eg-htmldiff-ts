@@ -4,6 +4,12 @@ This is a fork of [htmldiff-js](https://github.com/dfoverdx/htmldiff-js), which 
 
 NPM package: [@wesley-edwards/htmldiff-ts](https://www.npmjs.com/package/@wesley-edwards/htmldiff-ts)
 
+## Changes in 1.0.7
+
+Version 1.0.7 fixes corrupted diffs when only block-level tag attributes change (for example `<table>` gaining `class="confluenceTable wrapped"` or `<div>` gaining panel wrapper classes). Block and structural elements now receive a `data-diff="attrmod"` marker on the changed opening tag instead of being wrapped in `<ins class="diffmod">` / `<del class="diffmod">`, which previously produced invalid HTML and caused the browser to highlight most of the document.
+
+Inline and semantic elements (such as `eg-condition`) still use the existing `<ins class="diffmod">` wrap behaviour from 1.0.4.
+
 ## Changes in 1.0.6
 
 Version 1.0.6 fixes invisible diffs when plain text is wrapped or unwrapped in semantic tags such as `eg-condition`. Wrapper insert/delete operations are coalesced and rendered with `structure-change` highlights instead of emitting raw tags.
