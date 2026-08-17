@@ -4,6 +4,26 @@ This is a fork of [htmldiff-js](https://github.com/dfoverdx/htmldiff-js), which 
 
 NPM package: [@wesley-edwards/htmldiff-ts](https://www.npmjs.com/package/@wesley-edwards/htmldiff-ts)
 
+## Changes in 1.0.8
+
+Version 1.0.8 fixes a leaking `<strong>` (or any inline formatting tag) that made the rest of the document render as bold. It showed up most clearly when diffing an article against an empty article, where every word becomes a delete.
+
+### Root cause
+
+`insertTag` only inspected the *first* token of a run of consecutive tags. A formatting tag that appeared later in the run (for example the `</strong>` in `</a></strong>`, or the `<strong>` in `<li><strong>`) was written to the output verbatim and never pushed to or popped from `specialTagDiffStack`. The stack drifted out of sync, so a later `</strong>` matched a stale entry and was replaced by `</del>` instead of being written out, leaving its `<strong>` open for the rest of the document.
+
+### Fixes (`insertTag`)
+
+| Change | Why |
+|--------|-----|
+| Walk every tag in a run (`renderTagRun`) instead of only `words[0]` | Keeps `specialTagDiffStack` in sync with what is actually written to the output |
+| Derive formatting tags from `FORMATTING_TAGS` in `Utils` instead of a separate regex and closing-tag map | Removes the stateful `/g` regex and the missing `</sup>` entry |
+| Emit the remaining mod wrappers at the end of `insertTag` | A formatting element can open in one operation and close in another; the output now stays balanced |
+
+### Formatting-only changes
+
+`coalesceWrapperOperations` now also coalesces formatting tags, not just semantic wrappers such as `eg-condition`. Adding or removing only the formatting around unchanged text (for example `<strong>First option:</strong>` → `First option:`) is split into `delete` / `equal` / `delete` operations, which previously emitted an empty `<del class="mod">` plus an orphan `</strong>`. Those three operations are now coalesced into a single `replace`, so they render through the `format-change` highlights added in 1.0.5.
+
 ## Changes in 1.0.7
 
 Version 1.0.7 fixes corrupted diffs when only block-level tag attributes change (for example `<table>` gaining `class="confluenceTable wrapped"` or `<div>` gaining panel wrapper classes). Block and structural elements now receive a `data-diff="attrmod"` marker on the changed opening tag instead of being wrapped in `<ins class="diffmod">` / `<del class="diffmod">`, which previously produced invalid HTML and caused the browser to highlight most of the document.

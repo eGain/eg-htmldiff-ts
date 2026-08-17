@@ -9,22 +9,6 @@ import * as Utils from './Utils';
 // This value defines balance between speed and memory utilization. The higher it is the faster it works and more memory consumes.
 const MatchGranuarityMaximum = 4;
 
-const specialCaseClosingTags = new Map([
-    ['</strong>', 0],
-    ['</em>', 0],
-    ['</b>', 0],
-    ['</i>', 0],
-    ['</big>', 0],
-    ['</small>', 0],
-    ['</u>', 0],
-    ['</sub>', 0],
-    ['</strike>', 0],
-    ['</s>', 0],
-    ['</dfn>', 0],
-]);
-
-const specialCaseOpeningTagRegex = /<((strong)|(b)|(i)|(dfn)|(em)|(big)|(small)|(u)|(sub)|(sup)|(strike)|(s))[\>\s]+/ig;
-
 class HtmlDiff {
     constructor(oldText, newText, splitBy) {
         this.content = [];
@@ -209,58 +193,53 @@ class HtmlDiff {
         while (words.length) {
             let nonTags = this.extractConsecutiveWords(words, x => !Utils.isTag(x));
 
-            let specialCaseTagInjection = '';
-            let specialCaseTagInjectionIsbefore = false;
-
             if (nonTags.length !== 0) {
                 let text = Utils.wrapText(nonTags.join(''), tag, cssClass);
                 this.content.push(text);
-            } else {
-                if (specialCaseOpeningTagRegex.test(words[0])) {
-                    let matchedTag = words[0].match(specialCaseOpeningTagRegex);
-                    matchedTag = '<' + matchedTag[0].replace(/(<|>| )/g, '') + '>';
-                    this.specialTagDiffStack.push(matchedTag);
-                    specialCaseTagInjection = modOpen;
-                    if (tag === 'del') {
-                        words.shift();
-
-                        while (words.length > 0 && specialCaseOpeningTagRegex.test(words[0])) {
-                            words.shift();
-                        }
-                    }
-                } else if (specialCaseClosingTags.has(words[0])) {
-                    const closingName = words[0].replace(/\//g, '');
-                    const stackTop = this.specialTagDiffStack.length === 0
-                        ? null
-                        : this.specialTagDiffStack[this.specialTagDiffStack.length - 1];
-
-                    if (stackTop !== null && stackTop === closingName) {
-                        this.specialTagDiffStack.pop();
-                        specialCaseTagInjection = modClose;
-                        specialCaseTagInjectionIsbefore = true;
-
-                        if (tag === 'del') {
-                            words.shift();
-
-                            while (words.length > 0 && specialCaseClosingTags.has(words[0])) {
-                                words.shift();
-                            }
-                        }
-                    }
-                }
-
-
-                if (words.length === 0 && specialCaseTagInjection.length === 0) {
-                    break;
-                }
-
-                if (specialCaseTagInjectionIsbefore) {
-                    this.content.push(specialCaseTagInjection + this.extractConsecutiveWords(words, Utils.isTag).join(''));
-                } else {
-                    this.content.push(this.extractConsecutiveWords(words, Utils.isTag).join('') + specialCaseTagInjection);
-                }
+                continue;
             }
+
+            const tagWords = this.extractConsecutiveWords(words, Utils.isTag);
+
+            if (tagWords.length === 0) {
+                break;
+            }
+
+            this.content.push(this.renderTagRun(tagWords, tag, modOpen, modClose));
         }
+
+        // A formatting element can start inside this operation and end in another one.
+        // Close the wrappers we opened so the output stays balanced.
+        if (this.specialTagDiffStack.length !== 0) {
+            this.content.push(modClose.repeat(this.specialTagDiffStack.length));
+            this.specialTagDiffStack = [];
+        }
+    }
+
+    renderTagRun(tagWords, tag, modOpen, modClose) {
+        let result = '';
+
+        for (const word of tagWords) {
+            if (Utils.isFormattingOpeningTag(word)) {
+                this.specialTagDiffStack.push(Utils.getTagName(word));
+                result += tag === 'del' ? modOpen : word + modOpen;
+                continue;
+            }
+
+            const stackTop = this.specialTagDiffStack.length === 0
+                ? null
+                : this.specialTagDiffStack[this.specialTagDiffStack.length - 1];
+
+            if (Utils.isFormattingClosingTag(word) && stackTop === Utils.getTagName(word)) {
+                this.specialTagDiffStack.pop();
+                result += tag === 'del' ? modClose : modClose + word;
+                continue;
+            }
+
+            result += word;
+        }
+
+        return result;
     }
 
     extractConsecutiveWords(words, condition) {
@@ -341,8 +320,8 @@ class HtmlDiff {
             return null;
         }
 
-        if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) ||
-            !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+        if (!Utils.isCoalescableOpeningTag(openWords[0]) ||
+            !Utils.isCoalescableClosingTag(closeWords[0])) {
             return null;
         }
 
@@ -407,8 +386,8 @@ class HtmlDiff {
             return null;
         }
 
-        if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) ||
-            !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+        if (!Utils.isCoalescableOpeningTag(openWords[0]) ||
+            !Utils.isCoalescableClosingTag(closeWords[0])) {
             return null;
         }
 

@@ -3115,6 +3115,15 @@ function isFormattingOpeningTag(word) {
     return tagName !== null && FORMATTING_TAGS.has(tagName);
 }
 
+function isFormattingClosingTag(word) {
+    if (!isClosingTag(word)) {
+        return false;
+    }
+
+    var tagName = getTagName(word);
+    return tagName !== null && FORMATTING_TAGS.has(tagName);
+}
+
 function hasFormattingInWords(words) {
     return words.some(function (word) {
         return isFormattingOpeningTag(word);
@@ -3225,6 +3234,14 @@ function isSemanticWrapperClosingTag(word) {
 
     var tagName = getTagName(word);
     return tagName !== null && SEMANTIC_WRAPPER_TAGS.has(tagName);
+}
+
+function isCoalescableOpeningTag(word) {
+    return isSemanticWrapperOpeningTag(word) || isFormattingOpeningTag(word);
+}
+
+function isCoalescableClosingTag(word) {
+    return isSemanticWrapperClosingTag(word) || isFormattingClosingTag(word);
 }
 
 function hasSemanticWrapperInWords(words) {
@@ -3362,12 +3379,15 @@ exports.canWrapWordsInDiffTag = canWrapWordsInDiffTag;
 exports.markTagAttributeChange = markTagAttributeChange;
 exports.wordsSliceEqual = wordsSliceEqual;
 exports.isFormattingOpeningTag = isFormattingOpeningTag;
+exports.isFormattingClosingTag = isFormattingClosingTag;
 exports.hasFormattingInWords = hasFormattingInWords;
 exports.plainTextFromWords = plainTextFromWords;
 exports.isFormattingOnlyChange = isFormattingOnlyChange;
 exports.renderFormattingOnlyChange = renderFormattingOnlyChange;
 exports.isSemanticWrapperOpeningTag = isSemanticWrapperOpeningTag;
 exports.isSemanticWrapperClosingTag = isSemanticWrapperClosingTag;
+exports.isCoalescableOpeningTag = isCoalescableOpeningTag;
+exports.isCoalescableClosingTag = isCoalescableClosingTag;
 exports.hasSemanticWrapperInWords = hasSemanticWrapperInWords;
 exports.isWrapperOnlyChange = isWrapperOnlyChange;
 exports.renderWrapperOnlyChange = renderWrapperOnlyChange;
@@ -10056,10 +10076,6 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 // This value defines balance between speed and memory utilization. The higher it is the faster it works and more memory consumes.
 var MatchGranuarityMaximum = 4;
 
-var specialCaseClosingTags = new Map([['</strong>', 0], ['</em>', 0], ['</b>', 0], ['</i>', 0], ['</big>', 0], ['</small>', 0], ['</u>', 0], ['</sub>', 0], ['</strike>', 0], ['</s>', 0], ['</dfn>', 0]]);
-
-var specialCaseOpeningTagRegex = /<((strong)|(b)|(i)|(dfn)|(em)|(big)|(small)|(u)|(sub)|(sup)|(strike)|(s))[\>\s]+/ig;
-
 var HtmlDiff = function () {
     function HtmlDiff(oldText, newText, splitBy) {
         _classCallCheck(this, HtmlDiff);
@@ -10270,55 +10286,73 @@ var HtmlDiff = function () {
                     return !Utils.isTag(x);
                 });
 
-                var specialCaseTagInjection = '';
-                var specialCaseTagInjectionIsbefore = false;
-
                 if (nonTags.length !== 0) {
                     var text = Utils.wrapText(nonTags.join(''), tag, cssClass);
                     this.content.push(text);
-                } else {
-                    if (specialCaseOpeningTagRegex.test(words[0])) {
-                        var matchedTag = words[0].match(specialCaseOpeningTagRegex);
-                        matchedTag = '<' + matchedTag[0].replace(/(<|>| )/g, '') + '>';
-                        this.specialTagDiffStack.push(matchedTag);
-                        specialCaseTagInjection = modOpen;
-                        if (tag === 'del') {
-                            words.shift();
+                    continue;
+                }
 
-                            while (words.length > 0 && specialCaseOpeningTagRegex.test(words[0])) {
-                                words.shift();
-                            }
-                        }
-                    } else if (specialCaseClosingTags.has(words[0])) {
-                        var closingName = words[0].replace(/\//g, '');
-                        var stackTop = this.specialTagDiffStack.length === 0 ? null : this.specialTagDiffStack[this.specialTagDiffStack.length - 1];
+                var tagWords = this.extractConsecutiveWords(words, Utils.isTag);
 
-                        if (stackTop !== null && stackTop === closingName) {
-                            this.specialTagDiffStack.pop();
-                            specialCaseTagInjection = modClose;
-                            specialCaseTagInjectionIsbefore = true;
+                if (tagWords.length === 0) {
+                    break;
+                }
 
-                            if (tag === 'del') {
-                                words.shift();
+                this.content.push(this.renderTagRun(tagWords, tag, modOpen, modClose));
+            }
 
-                                while (words.length > 0 && specialCaseClosingTags.has(words[0])) {
-                                    words.shift();
-                                }
-                            }
-                        }
+            // A formatting element can start inside this operation and end in another one.
+            // Close the wrappers we opened so the output stays balanced.
+            if (this.specialTagDiffStack.length !== 0) {
+                this.content.push(modClose.repeat(this.specialTagDiffStack.length));
+                this.specialTagDiffStack = [];
+            }
+        }
+    }, {
+        key: 'renderTagRun',
+        value: function renderTagRun(tagWords, tag, modOpen, modClose) {
+            var result = '';
+
+            var _iteratorNormalCompletion2 = true;
+            var _didIteratorError2 = false;
+            var _iteratorError2 = undefined;
+
+            try {
+                for (var _iterator2 = tagWords[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+                    var word = _step2.value;
+
+                    if (Utils.isFormattingOpeningTag(word)) {
+                        this.specialTagDiffStack.push(Utils.getTagName(word));
+                        result += tag === 'del' ? modOpen : word + modOpen;
+                        continue;
                     }
 
-                    if (words.length === 0 && specialCaseTagInjection.length === 0) {
-                        break;
+                    var stackTop = this.specialTagDiffStack.length === 0 ? null : this.specialTagDiffStack[this.specialTagDiffStack.length - 1];
+
+                    if (Utils.isFormattingClosingTag(word) && stackTop === Utils.getTagName(word)) {
+                        this.specialTagDiffStack.pop();
+                        result += tag === 'del' ? modClose : modClose + word;
+                        continue;
                     }
 
-                    if (specialCaseTagInjectionIsbefore) {
-                        this.content.push(specialCaseTagInjection + this.extractConsecutiveWords(words, Utils.isTag).join(''));
-                    } else {
-                        this.content.push(this.extractConsecutiveWords(words, Utils.isTag).join('') + specialCaseTagInjection);
+                    result += word;
+                }
+            } catch (err) {
+                _didIteratorError2 = true;
+                _iteratorError2 = err;
+            } finally {
+                try {
+                    if (!_iteratorNormalCompletion2 && _iterator2.return) {
+                        _iterator2.return();
+                    }
+                } finally {
+                    if (_didIteratorError2) {
+                        throw _iteratorError2;
                     }
                 }
             }
+
+            return result;
         }
     }, {
         key: 'extractConsecutiveWords',
@@ -10404,7 +10438,7 @@ var HtmlDiff = function () {
                 return null;
             }
 
-            if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) || !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+            if (!Utils.isCoalescableOpeningTag(openWords[0]) || !Utils.isCoalescableClosingTag(closeWords[0])) {
                 return null;
             }
 
@@ -10464,7 +10498,7 @@ var HtmlDiff = function () {
                 return null;
             }
 
-            if (!Utils.isSemanticWrapperOpeningTag(openWords[0]) || !Utils.isSemanticWrapperClosingTag(closeWords[0])) {
+            if (!Utils.isCoalescableOpeningTag(openWords[0]) || !Utils.isCoalescableClosingTag(closeWords[0])) {
                 return null;
             }
 
@@ -10514,13 +10548,13 @@ var HtmlDiff = function () {
 
             var matchesWithoutOrphans = this.removeOrphans(matches);
 
-            var _iteratorNormalCompletion2 = true;
-            var _didIteratorError2 = false;
-            var _iteratorError2 = undefined;
+            var _iteratorNormalCompletion3 = true;
+            var _didIteratorError3 = false;
+            var _iteratorError3 = undefined;
 
             try {
-                for (var _iterator2 = matchesWithoutOrphans[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-                    var match = _step2.value;
+                for (var _iterator3 = matchesWithoutOrphans[Symbol.iterator](), _step3; !(_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done); _iteratorNormalCompletion3 = true) {
+                    var match = _step3.value;
 
                     var matchStartsAtCurrentPositionInOld = positionInOld === match.startInOld;
                     var matchStartsAtCurrentPositionInNew = positionInNew === match.startInNew;
@@ -10549,16 +10583,16 @@ var HtmlDiff = function () {
                     positionInNew = match.endInNew;
                 }
             } catch (err) {
-                _didIteratorError2 = true;
-                _iteratorError2 = err;
+                _didIteratorError3 = true;
+                _iteratorError3 = err;
             } finally {
                 try {
-                    if (!_iteratorNormalCompletion2 && _iterator2.return) {
-                        _iterator2.return();
+                    if (!_iteratorNormalCompletion3 && _iterator3.return) {
+                        _iterator3.return();
                     }
                 } finally {
-                    if (_didIteratorError2) {
-                        throw _iteratorError2;
+                    if (_didIteratorError3) {
+                        throw _iteratorError3;
                     }
                 }
             }
@@ -10568,7 +10602,7 @@ var HtmlDiff = function () {
     }, {
         key: 'removeOrphans',
         value: /*#__PURE__*/regeneratorRuntime.mark(function removeOrphans(matches) {
-            var prev, curr, _iteratorNormalCompletion3, _didIteratorError3, _iteratorError3, _iterator3, _step3, next, tmp, sumLength, oldDistanceInChars, newDistanceInChars, currMatchLengthInChars;
+            var prev, curr, _iteratorNormalCompletion4, _didIteratorError4, _iteratorError4, _iterator4, _step4, next, tmp, sumLength, oldDistanceInChars, newDistanceInChars, currMatchLengthInChars;
 
             return regeneratorRuntime.wrap(function removeOrphans$(_context) {
                 while (1) {
@@ -10576,19 +10610,19 @@ var HtmlDiff = function () {
                         case 0:
                             prev = null;
                             curr = null;
-                            _iteratorNormalCompletion3 = true;
-                            _didIteratorError3 = false;
-                            _iteratorError3 = undefined;
+                            _iteratorNormalCompletion4 = true;
+                            _didIteratorError4 = false;
+                            _iteratorError4 = undefined;
                             _context.prev = 5;
-                            _iterator3 = matches[Symbol.iterator]();
+                            _iterator4 = matches[Symbol.iterator]();
 
                         case 7:
-                            if (_iteratorNormalCompletion3 = (_step3 = _iterator3.next()).done) {
+                            if (_iteratorNormalCompletion4 = (_step4 = _iterator4.next()).done) {
                                 _context.next = 31;
                                 break;
                             }
 
-                            next = _step3.value;
+                            next = _step4.value;
 
                             if (!(curr === null)) {
                                 _context.next = 13;
@@ -10637,7 +10671,7 @@ var HtmlDiff = function () {
                             curr = next;
 
                         case 28:
-                            _iteratorNormalCompletion3 = true;
+                            _iteratorNormalCompletion4 = true;
                             _context.next = 7;
                             break;
 
@@ -10648,26 +10682,26 @@ var HtmlDiff = function () {
                         case 33:
                             _context.prev = 33;
                             _context.t0 = _context['catch'](5);
-                            _didIteratorError3 = true;
-                            _iteratorError3 = _context.t0;
+                            _didIteratorError4 = true;
+                            _iteratorError4 = _context.t0;
 
                         case 37:
                             _context.prev = 37;
                             _context.prev = 38;
 
-                            if (!_iteratorNormalCompletion3 && _iterator3.return) {
-                                _iterator3.return();
+                            if (!_iteratorNormalCompletion4 && _iterator4.return) {
+                                _iterator4.return();
                             }
 
                         case 40:
                             _context.prev = 40;
 
-                            if (!_didIteratorError3) {
+                            if (!_didIteratorError4) {
                                 _context.next = 43;
                                 break;
                             }
 
-                            throw _iteratorError3;
+                            throw _iteratorError4;
 
                         case 43:
                             return _context.finish(40);

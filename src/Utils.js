@@ -169,6 +169,15 @@ function isFormattingOpeningTag(word) {
     return tagName !== null && FORMATTING_TAGS.has(tagName);
 }
 
+function isFormattingClosingTag(word) {
+    if (!isClosingTag(word)) {
+        return false;
+    }
+
+    const tagName = getTagName(word);
+    return tagName !== null && FORMATTING_TAGS.has(tagName);
+}
+
 function hasFormattingInWords(words) {
     return words.some(word => isFormattingOpeningTag(word));
 }
@@ -275,6 +284,14 @@ function isSemanticWrapperClosingTag(word) {
 
     const tagName = getTagName(word);
     return tagName !== null && SEMANTIC_WRAPPER_TAGS.has(tagName);
+}
+
+function isCoalescableOpeningTag(word) {
+    return isSemanticWrapperOpeningTag(word) || isFormattingOpeningTag(word);
+}
+
+function isCoalescableClosingTag(word) {
+    return isSemanticWrapperClosingTag(word) || isFormattingClosingTag(word);
 }
 
 function hasSemanticWrapperInWords(words) {
@@ -411,12 +428,15 @@ export {
     markTagAttributeChange,
     wordsSliceEqual,
     isFormattingOpeningTag,
+    isFormattingClosingTag,
     hasFormattingInWords,
     plainTextFromWords,
     isFormattingOnlyChange,
     renderFormattingOnlyChange,
     isSemanticWrapperOpeningTag,
     isSemanticWrapperClosingTag,
+    isCoalescableOpeningTag,
+    isCoalescableClosingTag,
     hasSemanticWrapperInWords,
     isWrapperOnlyChange,
     renderWrapperOnlyChange

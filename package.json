@@ -1,6 +1,6 @@
 {
   "name": "@egainoss/htmldiff-ts",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Revamped version of htmldiff-js. Display diff between two html strings.",
   "main": "./dist/htmldiff.min.js",
   "types": "index.d.ts",
