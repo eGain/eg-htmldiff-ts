@@ -10298,7 +10298,7 @@ var HtmlDiff = function () {
                     break;
                 }
 
-                this.content.push(this.renderTagRun(tagWords, tag, modOpen, modClose));
+                this.content.push(tag === 'del' ? tagWords.join('') : this.renderTagRun(tagWords, modOpen, modClose));
             }
 
             // A formatting element can start inside this operation and end in another one.
@@ -10310,7 +10310,7 @@ var HtmlDiff = function () {
         }
     }, {
         key: 'renderTagRun',
-        value: function renderTagRun(tagWords, tag, modOpen, modClose) {
+        value: function renderTagRun(tagWords, modOpen, modClose) {
             var result = '';
 
             var _iteratorNormalCompletion2 = true;
@@ -10323,7 +10323,7 @@ var HtmlDiff = function () {
 
                     if (Utils.isFormattingOpeningTag(word)) {
                         this.specialTagDiffStack.push(Utils.getTagName(word));
-                        result += tag === 'del' ? modOpen : word + modOpen;
+                        result += word + modOpen;
                         continue;
                     }
 
@@ -10331,7 +10331,7 @@ var HtmlDiff = function () {
 
                     if (Utils.isFormattingClosingTag(word) && stackTop === Utils.getTagName(word)) {
                         this.specialTagDiffStack.pop();
-                        result += tag === 'del' ? modClose : modClose + word;
+                        result += modClose + word;
                         continue;
                     }
 

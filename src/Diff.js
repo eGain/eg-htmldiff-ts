@@ -205,7 +205,7 @@ class HtmlDiff {
                 break;
             }
 
-            this.content.push(this.renderTagRun(tagWords, tag, modOpen, modClose));
+            this.content.push(tag === 'del' ? tagWords.join('') : this.renderTagRun(tagWords, modOpen, modClose));
         }
 
         // A formatting element can start inside this operation and end in another one.
@@ -216,13 +216,13 @@ class HtmlDiff {
         }
     }
 
-    renderTagRun(tagWords, tag, modOpen, modClose) {
+    renderTagRun(tagWords, modOpen, modClose) {
         let result = '';
 
         for (const word of tagWords) {
             if (Utils.isFormattingOpeningTag(word)) {
                 this.specialTagDiffStack.push(Utils.getTagName(word));
-                result += tag === 'del' ? modOpen : word + modOpen;
+                result += word + modOpen;
                 continue;
             }
 
@@ -232,7 +232,7 @@ class HtmlDiff {
 
             if (Utils.isFormattingClosingTag(word) && stackTop === Utils.getTagName(word)) {
                 this.specialTagDiffStack.pop();
-                result += tag === 'del' ? modClose : modClose + word;
+                result += modClose + word;
                 continue;
             }
 

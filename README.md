@@ -4,6 +4,14 @@ This is a fork of [htmldiff-js](https://github.com/dfoverdx/htmldiff-js), which 
 
 NPM package: [@wesley-edwards/htmldiff-ts](https://www.npmjs.com/package/@wesley-edwards/htmldiff-ts)
 
+## Changes in 1.0.9
+
+Version 1.0.9 fixes a regression from 1.0.8 where deleted content lost its bold and italic formatting. On the delete side, `insertTag` was replacing every `<strong>` / `<em>` with `<del class="mod">`, so diffing an article against an empty article stripped all 271 formatting tags from the output.
+
+### Fix
+
+Delete-side tag runs are now emitted verbatim. Only the insert side uses `renderTagRun` to wrap formatting changes with `<ins class="mod">`. Deleted bold text now renders as `<strong><del class="diffdel">text</del></strong>` instead of `<del class="mod"><del class="diffdel">text</del></del>`.
+
 ## Changes in 1.0.8
 
 Version 1.0.8 fixes a leaking `<strong>` (or any inline formatting tag) that made the rest of the document render as bold. It showed up most clearly when diffing an article against an empty article, where every word becomes a delete.
